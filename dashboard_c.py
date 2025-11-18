@@ -1416,4 +1416,5 @@ if not dsi_summary.empty:
 
     st.plotly_chart(fig_dsi, use_container_width=True)
 else:
+
     st.info("Insufficient data to calculate DSI across time or no valid COGS/Inventory data found.")
