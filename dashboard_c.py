@@ -1,6 +1,3 @@
-# -------------------------------------------------------------
-# Cashew AI Dashboard (Streamlit) — Refactored: centralized date formatting
-# -------------------------------------------------------------
 import re
 from datetime import datetime, timedelta
 
@@ -18,32 +15,48 @@ from openai import OpenAI
 
 # --- LLM API INTEGRATION FUNCTION (USING st.secrets) ---
 
-# --- LLM API INTEGRATION FUNCTION (USING st.secrets) ---
-# --- LLM API INTEGRATION FUNCTION (USING st.secrets) ---
-# NOTE: Ensure this function is defined early in your script.
-
 def generate_llm_summary_api_call(agg_option, change_label, metrics_data):
     """
     Generates a concise 100-word C-suite summary using the OpenAI API and st.secrets.
     
     Args:
         metrics_data (dict): Dictionary containing the latest calculated metrics.
+    
+    Returns:
+        tuple: (llm_output, actionables_status, actionables_content)
+               actionables_status is 'amber', 'green', or 'error'.
     """
     
     api_key = st.secrets.get("OPENAI_API_KEY") 
     
+    # -------------------- START OF USER-REQUESTED MODIFICATION (Context) --------------------
+    caution_message = ""
+    is_revenue_lower = metrics_data['revenue_change'] < 0
+    is_profit_lower = metrics_data['profit_change'] < 0
+    
+    # Apply caution only if Revenue or Profit are lower than the previous period (WoW/MoM/QoQ/YoY).
+    if is_revenue_lower or is_profit_lower:
+        caution_message = (
+            f"**IMPORTANT CONTEXT:** The data provided is for the latest {agg_option} period, which may be incomplete. "
+            "If Revenue or Profit show a negative trend, seamlessly integrate a note of caution, "
+            "stating that the data should be interpreted with caution due to the incomplete period, and provide possible reasons "
+            "for the lower figures (e.g., lower sales due to partial data, seasonality, or temporary market shifts). "
+            "Ensure this caution is integrated into the 'Key Trends' bullets. Do NOT include this context section in your final output."
+        )
+    # -------------------- END OF USER-REQUESTED MODIFICATION (Context) --------------------
+    
     # Fallback/Error Check
     if not api_key:
-        return f"""
-        ## ⚠️ Configuration Error: OpenAI API Key Missing
-        * Please ensure your API key is correctly configured in **.streamlit/secrets.toml** under the key `OPENAI_API_KEY`.
-        * Current Data: Revenue Change: {metrics_data['revenue_change']:.1f}%, DSI: {metrics_data['dsi_value']} days.
-        """
+        error_content = f"""
+## ⚠️ Configuration Error: OpenAI API Key Missing
+* Please ensure your API key is correctly configured in **.streamlit/secrets.toml** under the key `OPENAI_API_KEY`.
+* Current Data: Revenue Change: {metrics_data['revenue_change']:.1f}%, DSI: {metrics_data['dsi_value']} days.
+"""
+        return error_content, "error", "" # Return error and empty actionable
 
     client = OpenAI(api_key=api_key)
     
     # 1. Format the data into a clean, structured table for the LLM
-    # FIX: Divide Revenue and Profit by 1000 and explicitly append 'K' to the input table.
     data_table = f"""
 | Metric | Latest Value (K SGD) | Change ({change_label}) | Status |
 |---|---|---|---|
@@ -58,37 +71,80 @@ def generate_llm_summary_api_call(agg_option, change_label, metrics_data):
     
     Your task is to analyze the data provided in the table below and write a summary for the executive team.
     
-    **Constraint 1 (Structure):** The output must be formatted as exactly two Markdown lists. The first list must contain **3 key trend bullet points**. The second list must contain **2 strategic action bullet points**.
-    **Constraint 2 (Content):** The strategic points should link back to key trends and should focus on growth, profit, and inventory (DSI) and address external factors (e.g., health trends, supply chain, global competition, labor costs and other important trends) that Singapore FMCG snack companies face. If key trends in on yearly data, strategies should be longer term. for monthly and weekly, strategies should be more short term and set achieveable goals to reach in the short term. There should be sufficient variation in the strategies proposed. the strategies must not sound the same across time periods. Set benchmakr targets which should be different for the short and long term
+    **Constraint 1 (Structure):** The output must be formatted as exactly three Markdown lists.
+        1. The first list, under "Key Trends", must contain **3 key trend bullet points**.
+        2. The second list, under "Immediate Actionables Required", must contain either **1-2 bullet points** detailing immediate actions for critical issues (like DSI being 'Risk' or sharp drops in Profit/Revenue), OR a single sentence/bullet point stating **"No immediate actionables required at this time."**
+        3. The third list, under "Growth Strategies", must contain **2 strategic action bullet points**.
+    
+    **Constraint 2 (Content - Growth Strategies):** The Growth Strategy points should link back to key trends and should focus on growth, profit, and inventory (DSI) and address external factors (e.g., health trends, supply chain, global competition, labor costs and other important trends) that Singapore FMCG snack companies face. If key trends in on yearly data, strategies should be longer term. for monthly and weekly, strategies should be more short term and set achieveable goals to reach in the short term. There should be sufficient variation in the strategies proposed. the strategies must not sound the same across time periods. Set benchmakr targets which should be different for the short and long term.
+    
     **Constraint 3 (Formatting):** Do NOT combine the profit and revenue metrics into a single sentence. Use the 'K' suffix for all financial values, as the input table is in thousands of SGD.
+    
     **Constraint 4 (Length):** The total word count must be under 150 words.
-    **COnstraint 5 (Headers);** Only have 2 sub headers, "Key Trends" and "Strategies". Do not add nor modify sub headers. The section should only have the 2 sub headers and bullet points. No other headers/sub headers.
+    
+    **Constraint 5 (Headers):** You MUST use the following **three** headers, and ONLY these three, in the order specified: "**Key Trends**", "**Immediate Actionables Required**", and "**Growth Strategies**". Do not use any other headers or modify these three.
     
     **Data Table for {agg_option} Analysis:**
     {data_table}
     
-  
     """
+    
+    final_prompt_content = caution_message + prompt
     
     try:
         response = client.chat.completions.create(
             model="gpt-4.1",
             messages=[
                 {"role": "system", "content": "You are a concise financial analyst for C-suite executives. You write strictly in markdown, following ALL constraints, especially the list structure, word count, and separation of metrics."},
-                {"role": "user", "content": prompt}
+                {"role": "user", "content": final_prompt_content}
             ],
             max_tokens=200, 
             temperature=0.1
         )
         llm_output = response.choices[0].message.content
-        return llm_output
+        
+        # -------------------- START OF USER-REQUESTED MODIFICATION (Extraction and Removal) --------------------
+        # Regex to capture content between "Immediate Actionables Required" and the next header "Growth Strategies"
+        # We capture the content and the header itself.
+        match = re.search(r'\*\*Immediate Actionables Required\*\*(.*?)\n\*\*Growth Strategies\*\*', llm_output, re.DOTALL | re.IGNORECASE)
+        
+        actionables_content = ""
+        actionables_status = "unknown"
+        llm_output_clean = llm_output # Start with the original output
+        
+        if match:
+            # Clean up the captured group (the actionables list)
+            actionables_content = match.group(1).strip()
+            
+            # --- KEY CHANGE: REMOVE THE SECTION ENTIRELY FROM THE MAIN OUTPUT ---
+            # Replace the entire block (header + content) with the next valid header
+            llm_output_clean = re.sub(r'\*\*Immediate Actionables Required\*\*(.*?)\n\*\*Growth Strategies\*\*', 
+                                      '\n\n**Growth Strategies**', # Replace the whole block with two newlines and the next header
+                                      llm_output, 
+                                      flags=re.DOTALL | re.IGNORECASE,
+                                      count=1)
+            
+            # Determine status: Amber if specific actions, Green if 'No immediate actionables'
+            if "no immediate actionables required at this time" in actionables_content.lower():
+                actionables_status = "green"
+            else:
+                actionables_status = "amber"
+                
+            return llm_output_clean, actionables_status, actionables_content
+
+        # Fallback if regex fails to find the section
+        return llm_output, "unknown", ""
+        # -------------------- END OF USER-REQUESTED MODIFICATION (Extraction and Removal) --------------------
         
     except Exception as e:
-        return f"""
-        ## ⚠️ LLM Error: Summary Generation Failed
-        * Could not execute API call. Details: `{e}`
-        * Check network connection and model availability.
-        """
+        error_content = f"""
+## ⚠️ LLM Error: Summary Generation Failed
+* Could not execute API call. Details: `{e}`
+* Check network connection and model availability.
+"""
+        return error_content, "error", ""
+
+
 # -------------------- GLOBALS / CONFIG ------------------------
 # Chart template + fonts (preserved)
 pio.templates.default = "plotly_white"
@@ -100,129 +156,130 @@ pio.templates["plotly_white"].layout.yaxis.title.font.size = 14
 st.set_page_config(page_title="Cashew AI Dashboard", layout="wide")
 
 # Date / period related global constants & regex
-WEEKLY_PERIOD_REGEX = re.compile(r"Wk(\d+)\s*([A-Za-z]{3})(\d{4})")  # expects 'Wk3 Sep2025' or similar
-MONTHLY_FMT = "%Y-%m"   # format used when we store period as period.to_period('M').astype(str)
+WEEKLY_PERIOD_REGEX = re.compile(r"Wk(\d+)\s*([A-Za-z]{3})(\d{4})") # expects 'Wk3 Sep2025' or similar
+MONTHLY_FMT = "%Y-%m"  # format used when we store period as period.to_period('M').astype(str)
 YEARLY_FMT = "%Y"
 
 # Rolling window default (kept interactive in sidebar but provide default)
 DEFAULT_ROLLING_WINDOW = 3
 
-# -------------------- DATA LOADING ---------------------------
+# -------------------- DATA LOADING (OPTIMIZED) ---------------------------
+def safe_to_datetime(df, col):
+    """Convert column to datetime if present and not already."""
+    if col in df.columns:
+        df[col] = pd.to_datetime(df[col], errors='coerce', dayfirst=False) # Ensure consistent parsing
+    return df
+
 @st.cache_data
-def load_data():
+def load_and_preprocess_data():
     sales = pd.read_csv("sales_transactions_expanded_modified.csv")
     sku = pd.read_csv("sku_master_expanded.csv")
     customers = pd.read_csv("customers.csv")
     traffic = pd.read_csv("traffic_acquisition.csv")
     events = pd.read_csv("events_amended.csv")
     ecommerce = pd.read_csv("ecommerce_purchases.csv")
-    
-    # Load Inventory Value Data
     inventory_value = pd.read_csv("diminventoryvalue.csv")
 
     # Keep legacy column name handling
     if "line_net_sales_sgd" in sales.columns:
         sales.rename(columns={"line_net_sales_sgd": "net_sales_sgd"}, inplace=True)
 
-    return sales, sku, customers, traffic, events, ecommerce, inventory_value
+    # Convert all known datetime columns (ONE TIME)
+    sales = safe_to_datetime(sales, 'order_datetime')
+    ecommerce = safe_to_datetime(ecommerce, 'order_datetime')
+    customers = safe_to_datetime(customers, 'register_datetime')
+    traffic = safe_to_datetime(traffic, 'start_date')
+    events = safe_to_datetime(events, 'start_date')
+    inventory_value = safe_to_datetime(inventory_value, 'Week Ending Date') # NEW: Convert 'Week Ending Date'
+
+    # --- Core Sales Pre-calculation (OPTIMIZATION) ---
+    # Merge sales with SKU cost and calculate profit
+    sales = sales.merge(sku[['sku', 'cost_unit_price_sgd']], on='sku', how='left')
+    sales['profit_sgd'] = sales['net_sales_sgd'] - (sales['cost_unit_price_sgd'] * sales['quantity'])
+    sales['cogs'] = sales['cost_unit_price_sgd'] * sales['quantity']
+    sales['channel_type'] = sales['platform'].apply(lambda x: 'Offline' if pd.isna(x) or x == '' else 'Online')
+    
+    # --- DSI Fallback Pre-calculation ---
+    last_non_zero_inventory = 0
+    if not inventory_value.empty:
+        non_zero_inventory = inventory_value[inventory_value['Average Inventory'] > 0]
+        if not non_zero_inventory.empty:
+            # Get the last non-zero inventory value as a safe proxy
+            last_non_zero_inventory = non_zero_inventory['Average Inventory'].iloc[-1]
+            
+    # Load Projected Revenue Data (NEW)
+    try:
+        projected_revenue = pd.read_csv("dimprojectedrevenue.csv")
+        if 'Quarters' not in projected_revenue.columns:
+             raise ValueError("The 'Quarters' column is missing in dimprojectedrevenue.csv, and 'Date' is removed.")
+        projected_revenue.rename(columns={'Total_Revenue': 'net_sales_sgd', 'Quarters': 'time_period'}, inplace=True)
+        projected_revenue = projected_revenue.dropna(subset=['time_period', 'net_sales_sgd'])
+        projected_revenue['time_period'] = projected_revenue['time_period'].astype(str)
+    except FileNotFoundError:
+        st.warning("⚠️ dimprojectedrevenue.csv not found. Forecasted revenue will not be shown.")
+        projected_revenue = pd.DataFrame({'time_period': [], 'net_sales_sgd': []})
+    except ValueError as e:
+        st.error(f"⚠️ Error loading dimprojectedrevenue.csv: {e}")
+        projected_revenue = pd.DataFrame({'time_period': [], 'net_sales_sgd': []})
+
+    return sales, sku, customers, traffic, events, ecommerce, inventory_value, projected_revenue, last_non_zero_inventory
 
 try:
-    sales, sku, customers, traffic, events, ecommerce, inventory_value = load_data()
+    # Load all data and perform one-time preprocessing
+    sales_raw, sku, customers, traffic_raw, events_raw, ecommerce_raw, inventory_value, projected_revenue, last_non_zero_inventory = load_and_preprocess_data()
 except FileNotFoundError as e:
     st.error(f"⚠️ Missing file: {e.filename}. Please ensure all CSV files are in the same folder.")
     st.stop()
-
-# Load Projected Revenue Data (NEW)
-try:
-    projected_revenue = pd.read_csv("dimprojectedrevenue.csv")
+except Exception as e:
+    st.error(f"⚠️ An error occurred during data loading and preprocessing: {e}")
+    st.stop()
     
-    # --- FIX: 'Date' column is removed, use 'Quarters' and rename it to 'time_period' ---
-    if 'Quarters' not in projected_revenue.columns:
-         # Raising an error here as we rely on 'Quarters' for time identification now.
-        raise ValueError("The 'Quarters' column is missing in dimprojectedrevenue.csv, and 'Date' is removed.")
-        
-    projected_revenue.rename(columns={'Total_Revenue': 'net_sales_sgd', 'Quarters': 'time_period'}, inplace=True)
-    
-    # Drop rows where the critical time identifier or revenue is missing
-    projected_revenue = projected_revenue.dropna(subset=['time_period', 'net_sales_sgd'])
-    
-    # Ensure time_period is string
-    projected_revenue['time_period'] = projected_revenue['time_period'].astype(str)
-
-except FileNotFoundError:
-    st.warning("⚠️ dimprojectedrevenue.csv not found. Forecasted revenue will not be shown.")
-    projected_revenue = pd.DataFrame({'time_period': [], 'net_sales_sgd': []})
-except ValueError as e:
-    st.error(f"⚠️ Error loading dimprojectedrevenue.csv: {e}")
-    projected_revenue = pd.DataFrame({'time_period': [], 'net_sales_sgd': []})
-
+# Deep copy the raw dataframes to apply aggregation without re-running load_and_preprocess_data
+sales = sales_raw.copy()
+ecommerce = ecommerce_raw.copy()
+events = events_raw.copy()
+traffic = traffic_raw.copy()
 
 # -------------------- PREPROCESSING (centralised) -------------------
-def safe_to_datetime(df, col):
-    """Convert column to datetime if present and not already."""
-    if col in df.columns:
-        df[col] = pd.to_datetime(df[col], errors='coerce')
-    return df
-
-# Convert all known datetime columns
-safe_to_datetime(sales, 'order_datetime')
-safe_to_datetime(ecommerce, 'order_datetime')
-safe_to_datetime(customers, 'register_datetime')
-safe_to_datetime(traffic, 'start_date')
-safe_to_datetime(events, 'start_date')
-
-# NEW: Convert 'Week Ending Date' in inventory data
-safe_to_datetime(inventory_value, 'Week Ending Date')
-
-# --- DSI Fallback Pre-calculation ---
-last_non_zero_inventory = 0
-if not inventory_value.empty:
-    non_zero_inventory = inventory_value[inventory_value['Average Inventory'] > 0]
-    if not non_zero_inventory.empty:
-        # Get the last non-zero inventory value as a safe proxy
-        last_non_zero_inventory = non_zero_inventory['Average Inventory'].iloc[-1]
-# ------------------------------------
-
-
 # Provide a reusable assign_time_group that sets time_period consistently
+@st.cache_data(show_spinner=False)
 def assign_time_group(df, date_col, agg_option):
     """
     Adds:
       - time_period (string): 'Wk{n} {MonYear}' or 'YYYY-MM' or 'YYYY-QQ' or 'YYYY'
-      - week_start (datetime): representative date for sorting (min date of period)
+    
+    This function is slightly optimized for vectorization.
     """
     df = df.copy()
+    
+    if df.empty or date_col not in df.columns:
+        df['time_period'] = pd.Series([], dtype='object')
+        df['week_start'] = pd.Series([], dtype='datetime64[ns]')
+        return df
+        
+    df = df.dropna(subset=[date_col])
+
     if agg_option == "Weekly":
         # Vectorised week-in-month calculation
-        # week_in-month: 1..5
         week_num = ((df[date_col].dt.day - 1) // 7) + 1
-        month_year = df[date_col].dt.strftime('%b%Y')  # 'Sep2025'
+        month_year = df[date_col].dt.strftime('%b%Y') # 'Sep2025'
         df['time_period'] = 'Wk' + week_num.astype(str) + ' ' + month_year
-        df['week_start'] = df[date_col]  # keep original date for sorting; we'll derive period_dt later
+        df['week_start'] = df[date_col] # keep original date for sorting; we'll derive period_dt later
     elif agg_option == "Monthly":
-        df['time_period'] = df[date_col].dt.to_period('M').astype(str)  # '2025-09'
+        df['time_period'] = df[date_col].dt.to_period('M').astype(str) # '2025-09'
         df['week_start'] = df[date_col]
     elif agg_option == "Quarterly":
-        # FIX: Ensure 'Q' frequency is used correctly
-        df['time_period'] = df[date_col].dt.to_period('Q').astype(str)  # '2025Q3'
+        df['time_period'] = df[date_col].dt.to_period('Q').astype(str) # '2025Q3'
         df['week_start'] = df[date_col]
-    else:  # Yearly
-        df['time_period'] = df[date_col].dt.to_period('Y').astype(str)  # '2025'
+    else: # Yearly
+        df['time_period'] = df[date_col].dt.to_period('Y').astype(str) # '2025'
         df['week_start'] = df[date_col]
+        
     return df
 
-# Sidebar: aggregation selection (keeps behaviour)
-st.sidebar.header("📅 Time Aggregation")
-agg_option = st.sidebar.radio("Select Time Granularity:", ["Weekly", "Monthly", "Quarterly", "Yearly"])
-change_label = {"Weekly": "WoW", "Monthly": "MoM", "Quarterly": "QoQ", "Yearly": "YoY"}[agg_option]
-
-# Apply to all relevant frames
-sales = assign_time_group(sales, 'order_datetime', agg_option)
-ecommerce = assign_time_group(ecommerce, 'order_datetime', agg_option)
-events = assign_time_group(events, 'start_date', agg_option)
-traffic = assign_time_group(traffic, 'start_date', agg_option)
-
 # Centralised function to convert time_period strings to a sortable period_dt and a display label
+# This function is used often, so it should be fast.
+@st.cache_data(show_spinner=False)
 def period_string_to_dt_and_label(series, agg_option):
     """
     Input: pd.Series of strings (time_period)
@@ -232,35 +289,26 @@ def period_string_to_dt_and_label(series, agg_option):
     s = series.astype(str).copy()
 
     if agg_lower == "weekly":
-        # Extract week number, month abbreviation, and year using vectorised str.extract
         extracted = s.str.extract(r'Wk(\d+)\s*([A-Za-z]{3})(\d{4})')
         extracted.columns = ['week_num', 'month_str', 'year']
-        # safe conversion
         extracted['week_num'] = pd.to_numeric(extracted['week_num'], errors='coerce').fillna(1).astype(int)
         extracted['year'] = pd.to_numeric(extracted['year'], errors='coerce').astype('Int64')
-        # Convert month abbreviation to month number (coerce invalid -> NaN)
         extracted['month_num'] = pd.to_datetime(extracted['month_str'], format='%b', errors='coerce').dt.month
-        # Build a base date = first of that month/year
         base = pd.to_datetime(extracted['year'].astype(str) + '-' + extracted['month_num'].astype(str) + '-01', errors='coerce')
-        # Add (week_num - 1) * 7 days to get week-start approx, then align to Monday
         period_dt = base + pd.to_timedelta((extracted['week_num'] - 1) * 7, unit='d')
-        period_dt = period_dt - pd.to_timedelta(period_dt.dt.weekday, unit='d')  # align to Monday
-        label = s  # keep original 'WkX MonYYYY'
+        period_dt = period_dt - pd.to_timedelta(period_dt.dt.weekday, unit='d') # align to Monday
+        label = s 
         return period_dt, label
 
     elif agg_lower == "monthly":
-        # series example: '2025-09'
         period_dt = pd.to_datetime(s, format=MONTHLY_FMT, errors='coerce')
         label = period_dt.dt.strftime('%b %Y').fillna(s)
         return period_dt, label
 
     elif agg_lower == "quarterly":
-        # series example: '2025Q3' -> convert to start of quarter e.g. 2025-07-01
-        # Fix: Use PeriodIndex to correctly handle 'YYYYQ#' format and convert to start-of-period timestamp.
-        # Ensure we set freq='Q' to avoid issues if the PeriodIndex infers yearly.
         period_index = pd.PeriodIndex(s, freq='Q')
         period_dt = period_index.to_timestamp(how='start')
-        label = s # keep original 'YYYYQ#' format
+        label = s 
         return period_dt, label
 
     elif agg_lower == "yearly":
@@ -268,8 +316,18 @@ def period_string_to_dt_and_label(series, agg_option):
         label = period_dt.dt.strftime('%Y').fillna(s)
         return period_dt, label
 
-    # fallback
     return pd.to_datetime(s, errors='coerce'), s
+
+# Sidebar: aggregation selection (keeps behaviour)
+st.sidebar.header("📅 Time Aggregation")
+agg_option = st.sidebar.radio("Select Time Granularity:", ["Weekly", "Monthly", "Quarterly", "Yearly"])
+change_label = {"Weekly": "WoW", "Monthly": "MoM", "Quarterly": "QoQ", "Yearly": "YoY"}[agg_option]
+
+# Apply to all relevant frames (now much faster due to cache/vectorization)
+sales = assign_time_group(sales, 'order_datetime', agg_option)
+ecommerce = assign_time_group(ecommerce, 'order_datetime', agg_option)
+events = assign_time_group(events, 'start_date', agg_option)
+traffic = assign_time_group(traffic, 'start_date', agg_option)
 
 # Add period_dt and human-readable label to sales (and reuse later if needed)
 sales['period_dt'], sales['time_period_label'] = period_string_to_dt_and_label(sales['time_period'], agg_option)
@@ -278,7 +336,8 @@ events['period_dt'], events['time_period_label'] = period_string_to_dt_and_label
 traffic['period_dt'], traffic['time_period_label'] = period_string_to_dt_and_label(traffic['time_period'], agg_option)
 
 # -------------------- DYNAMIC DSI CALCULATION FUNCTION (Required for Time Series and Topline Metric) --------------------
-
+# NOTE: This function's logic is preserved as it is the required calculation.
+# It is called on a group-by object below to calculate all DSI values at once.
 def calculate_dsi_for_period(period_name, period_sales_df, inventory_df):
     """Calculates DSI for a single time period."""
 
@@ -290,11 +349,9 @@ def calculate_dsi_for_period(period_name, period_sales_df, inventory_df):
     # Determine date range and days for the current period
     min_date_period = period_sales_df['order_datetime'].min()
     max_date_period = period_sales_df['order_datetime'].max()
-    # Ensure min/max dates are not NaT before calculating total_days
     if pd.isna(min_date_period) or pd.isna(max_date_period):
         total_days = 30 # Fallback to a proxy if dates are bad
     else:
-        # Calculate difference in days (inclusive)
         total_days = (max_date_period - min_date_period).days + 1
 
     average_inventory = 0
@@ -311,7 +368,6 @@ def calculate_dsi_for_period(period_name, period_sales_df, inventory_df):
     else:
         # 2. If no weekly inventory entry falls *exactly* within the sales period,
         # find the latest inventory value that occurred on or before the period's end date.
-
         inventory_up_to_period = inventory_df[
             inventory_df['Week Ending Date'] <= max_date_period
         ].sort_values('Week Ending Date')
@@ -323,103 +379,72 @@ def calculate_dsi_for_period(period_name, period_sales_df, inventory_df):
     # 3. Calculate DSI: (Average Inventory / COGS) * Days in Period
     if total_cogs > 0 and average_inventory > 0:
         dsi_value = (average_inventory / total_cogs) * total_days
-        # Round to the nearest whole number for consistency with the metric display
         return round(dsi_value)
     else:
         return 0
-
 # -------------------- MERGE & CALCULATIONS -----------------------
-# Merge sales with SKU cost and calculate profit (kept same variables/names)
-sales = sales.merge(sku[['sku', 'cost_unit_price_sgd']], on='sku', how='left')
-sales['profit_sgd'] = sales['net_sales_sgd'] - (sales['cost_unit_price_sgd'] * sales['quantity'])
-# NEW: Calculate COGS per transaction for DSI calculation
-sales['cogs'] = sales['cost_unit_price_sgd'] * sales['quantity']
+# Merging and COGS/Profit calculation is now done once in load_and_preprocess_data.
+# sales already contains 'profit_sgd', 'cogs', and 'channel_type'
 
+# -------------------- FULL METRIC CALCULATION BLOCK (OPTIMIZED) -------------------
+# This block calculates all necessary variables once.
 
-# Ensure channel_type column exists and matches original logic
-sales['channel_type'] = sales['platform'].apply(lambda x: 'Offline' if pd.isna(x) or x == '' else 'Online')
-
-# -------------------- DASHBOARD HEADER ---------------------------
-# -------------------- FULL METRIC CALCULATION BLOCK (Resolution for NameError) -------------------
-# This block calculates all necessary variables (current_revenue, dsi_value, etc.) 
-# before they are used by the LLM function or the metric display.
-
-# Recalculate sales, ecommerce, events, traffic after fixing time_period_label
-sales['period_dt'], sales['time_period_label'] = period_string_to_dt_and_label(sales['time_period'], agg_option)
-# Other frames (ecommerce, events, traffic) also need recalculation here if used in charts below
-# ecommerce['period_dt'], ecommerce['time_period_label'] = period_string_to_dt_and_label(ecommerce['time_period'], agg_option)
-# ... (Assuming other frame updates are handled elsewhere or not critical for these metrics)
-
-
-# Period revenue grouped by time_period using period_dt for sorting
+# 1. Grouped Revenue and Profit
 period_revenue = (
-    sales.groupby(['time_period', 'period_dt'], as_index=False)
+    sales.groupby(['time_period', 'period_dt', 'time_period_label'], as_index=False)
     .agg(net_sales_sgd=('net_sales_sgd', 'sum'))
     .sort_values('period_dt')
 )
-
-# Total Profits (period_profit uses period_dt as sort key)
 period_profit = (
-    sales.groupby(['time_period', 'period_dt'], as_index=False)
+    sales.groupby(['time_period', 'period_dt', 'time_period_label'], as_index=False)
     .agg(profit_sgd=('profit_sgd', 'sum'))
     .sort_values('period_dt')
 )
 
-# Online share (using time_period ordering)
+# 2. Online Share
 share_summary = (
     sales.groupby(['time_period', 'period_dt', 'channel_type'], as_index=False)['net_sales_sgd']
     .sum()
     .pivot_table(index=['time_period', 'period_dt'], columns='channel_type', values='net_sales_sgd', fill_value=0)
     .reset_index()
 )
-if 'Online' not in share_summary.columns:
-    share_summary['Online'] = 0
-if 'Offline' not in share_summary.columns:
-    share_summary['Offline'] = 0
-
+if 'Online' not in share_summary.columns: share_summary['Online'] = 0
+if 'Offline' not in share_summary.columns: share_summary['Offline'] = 0
 share_summary['online_share'] = share_summary['Online'] / (share_summary['Online'] + share_summary['Offline']) * 100
 share_summary = share_summary.sort_values('period_dt')
 
-# --- CALCULATE ALL TOPLINE METRIC VALUES ---
 
-# Revenue Metrics
-if len(period_revenue) < 2:
-    current_revenue = float(period_revenue['net_sales_sgd'].iloc[-1]) if len(period_revenue) else 0.0
-    revenue_change = 0.0
-else:
+# 3. Topline Metric Values (Last Period)
+if len(period_revenue) >= 1:
     current_revenue = period_revenue['net_sales_sgd'].iloc[-1]
-    revenue_change = period_revenue['net_sales_sgd'].pct_change().iloc[-1] * 100
-
-# Profit Metrics
-if len(period_profit) >= 2:
     current_profit = period_profit['profit_sgd'].iloc[-1]
-    profit_change = period_profit['profit_sgd'].pct_change().iloc[-1] * 100
-else:
-    current_profit = float(period_profit['profit_sgd'].iloc[-1]) if len(period_profit) else 0.0
-    profit_change = 0.0
-
-# Online Share Metrics
-if len(share_summary) >= 1:
     current_online = share_summary['online_share'].iloc[-1]
+    latest_period_str = period_revenue.iloc[-1]['time_period']
+    latest_period_label = period_revenue.iloc[-1]['time_period_label']
+    
+    # >> FIX: Define the missing variable 'latest_period_dt'
+    latest_period_dt = period_revenue.iloc[-1]['period_dt'] 
+    
+    # Change calculation
+    revenue_change = period_revenue['net_sales_sgd'].pct_change().iloc[-1] * 100 if len(period_revenue) >= 2 else 0.0
+    profit_change = period_profit['profit_sgd'].pct_change().iloc[-1] * 100 if len(period_profit) >= 2 else 0.0
     online_change = current_online - share_summary['online_share'].iloc[-2] if len(share_summary) >= 2 else 0.0
-else:
-    current_online = 0.0
-    online_change = 0.0
 
+else: # Default for empty data
+    current_revenue = current_profit = current_online = revenue_change = profit_change = online_change = 0.0
+    latest_period_str = None
+    latest_period_label = ""
+    latest_period_dt = None # Set a safe default for the date object
+    
 
-# DSI Metrics
-latest_period_str = period_revenue.iloc[-1]['time_period'] if not period_revenue.empty else None
+# 4. DSI Metrics (Calling the DSI function for the latest period only)
 if latest_period_str:
     latest_sales_period = sales[sales['time_period'] == latest_period_str].copy()
-    
-    # Calculate DSI using the dedicated function
-    # NOTE: calculate_dsi_for_period must be defined earlier in the script.
     dsi_value = calculate_dsi_for_period(latest_period_str, latest_sales_period, inventory_value)
-
 else:
     dsi_value = 0
 
-dsi_status = "Healthy" if 20 <= dsi_value <= 45 else ("Risk" if dsi_value > 45 else "Excellent")
+dsi_status = "Healthy" if 30 <= dsi_value <= 45 else ("Risk" if dsi_value > 45 else "Excellent")
 change_label = {"Weekly": "WoW", "Monthly": "MoM", "Quarterly": "QoQ", "Yearly": "YoY"}.get(agg_option, "Period-over-Period")
 
 
@@ -438,148 +463,41 @@ metrics_for_llm = {
 }
 
 # --- GENERATE AND DISPLAY LLM SUMMARY ---
-# NOTE: generate_llm_summary_api_call must be defined earlier in the script.
-llm_summary_markdown = generate_llm_summary_api_call(agg_option, change_label, metrics_for_llm)
 
-# Render the dynamic LLM summary before all other content
+# FIX: Update the function call to expect the new return tuple
+llm_summary_markdown, actionables_status, actionables_content = generate_llm_summary_api_call(agg_option, change_label, metrics_for_llm)
+
+# -------------------- END OF USER-REQUESTED MODIFICATION (Display) --------------------
+# -------------------- START OF USER-REQUESTED MODIFICATION (Display) --------------------
+# 1. Display the Immediate Actionables box using st.success (green) or st.warning (amber)
+if actionables_status == "amber":
+    st.warning(f"**🔴 IMMEDIATE ACTION REQUIRED**\n\n{actionables_content}")
+elif actionables_status == "green":
+    st.success(f"**🟢 ACTION STATUS: HEALTHY**\n\n{actionables_content}")
+elif actionables_status == "error":
+    # If there was an error, the main markdown already contains the error message, so we just pass.
+    pass
+else:
+    # If extraction failed, display the content neutrally in the summary
+    pass
+
+# 2. Display the full LLM summary
 st.markdown(llm_summary_markdown, unsafe_allow_html=True)
-
 st.markdown("---") # Separator after the summary
 
+# -------------------- END OF USER-REQUESTED MODIFICATION (Display) --------------------
 
-# -------------------- I. Growth & Profitability -----------------
+#-------------------- I. Growth & Profitability -----------------
 st.subheader("I. Growth & Profitability")
 col1, col2, col3, col4 = st.columns(4)
 
-# Period revenue grouped by time_period using period_dt for sorting
-period_revenue = (
-    sales.groupby(['time_period', 'period_dt'], as_index=False)
-    .agg(net_sales_sgd=('net_sales_sgd', 'sum'))
-    .sort_values('period_dt')
-)
-
-# defensive handling for length < 2
-if len(period_revenue) < 2:
-    current_revenue = float(period_revenue['net_sales_sgd'].iloc[-1]) if len(period_revenue) else 0.0
-    previous_revenue = 0.0
-    revenue_change = 0.0
-    current_period_label = period_revenue['time_period'].iloc[-1] if len(period_revenue) else ""
-else:
-    current_revenue = period_revenue['net_sales_sgd'].iloc[-1]
-    previous_revenue = period_revenue['net_sales_sgd'].iloc[-2]
-    revenue_change = period_revenue['net_sales_sgd'].pct_change().iloc[-1] * 100
-    current_period_label = period_revenue['time_period'].iloc[-1]
-
+# Use pre-calculated metrics
 col1.metric(f"Total Revenue ({agg_option})", f"${current_revenue:,.0f}", f"{revenue_change:.2f}% {change_label}")
-
-# Total Profits (period_profit uses period_dt as sort key)
-period_profit = (
-    sales.groupby(['time_period', 'period_dt'], as_index=False)
-    .agg(profit_sgd=('profit_sgd', 'sum'))
-    .sort_values('period_dt')
-)
-if len(period_profit) >= 2:
-    current_profit = period_profit['profit_sgd'].iloc[-1]
-    profit_change = period_profit['profit_sgd'].pct_change().iloc[-1] * 100
-else:
-    current_profit = float(period_profit['profit_sgd'].iloc[-1]) if len(period_profit) else 0.0
-    profit_change = 0.0
-
 col2.metric(f"Total Profit ({agg_option})", f"${current_profit:,.0f}", f"{profit_change:.2f}% {change_label}")
-
-# Online share (using time_period ordering)
-share_summary = (
-    sales.groupby(['time_period', 'period_dt', 'channel_type'], as_index=False)['net_sales_sgd']
-    .sum()
-    .pivot_table(index=['time_period', 'period_dt'], columns='channel_type', values='net_sales_sgd', fill_value=0)
-    .reset_index()
-)
-# Guard against missing columns
-if 'Online' not in share_summary.columns:
-    share_summary['Online'] = 0
-if 'Offline' not in share_summary.columns:
-    share_summary['Offline'] = 0
-
-share_summary['online_share'] = share_summary['Online'] / (share_summary['Online'] + share_summary['Offline']) * 100
-share_summary = share_summary.sort_values('period_dt')
-
-if len(share_summary) >= 2:
-    current_online = share_summary['online_share'].iloc[-1]
-    online_change = current_online - share_summary['online_share'].iloc[-2]
-else:
-    current_online = share_summary['online_share'].iloc[-1] if len(share_summary) else 0.0
-    online_change = 0.0
-
 col3.metric("Online Revenue Share", f"{current_online:.1f}%", f"{online_change:.1f} pp {change_label}")
 
-
-# -------------------- DYNAMIC DSI CALCULATION START (FIXED FINAL) --------------------
-
-# Identify the latest period and filter the data to match the current aggregation
-if len(period_revenue) >= 1:
-    latest_period_str = period_revenue.iloc[-1]['time_period']
-    # Filter sales data down to the transactions of the latest period
-    latest_sales_period = sales[sales['time_period'] == latest_period_str].copy()
-else:
-    latest_sales_period = sales.iloc[0:0] # Empty dataframe
-
-# 1. Total COGS and Days in Period (using latest_sales_period)
-if not latest_sales_period.empty:
-    total_cogs = latest_sales_period['cogs'].sum()
-    
-    # Determine date range and days for the latest period
-    min_date_period = latest_sales_period['order_datetime'].min()
-    max_date_period = latest_sales_period['order_datetime'].max()
-    total_days = (max_date_period - min_date_period).days + 1
-else:
-    total_cogs = 0
-    min_date_period = datetime.now()
-    max_date_period = datetime.now()
-    total_days = 1
-
-
-# 2. Average Inventory from diminventoryvalue.csv (REVISED LOGIC WITH FALLBACK TO LAST NON-ZERO)
-average_inventory = 0
-if not inventory_value.empty:
-    
-    # 2a. Filter inventory entries that fall *within* the sales period
-    filtered_inventory = inventory_value[
-        (inventory_value['Week Ending Date'] >= min_date_period) & 
-        (inventory_value['Week Ending Date'] <= max_date_period)
-    ]
-    
-    if not filtered_inventory.empty:
-        # If we have weekly entries within the period, use their average. (e.g., Monthly/Quarterly agg)
-        average_inventory = filtered_inventory['Average Inventory'].mean()
-    else:
-        # 2b. If no weekly inventory entry falls *exactly* within the sales period, 
-        # find the latest inventory value that occurred on or before the period's end date.
-        
-        inventory_up_to_period = inventory_value[
-            inventory_value['Week Ending Date'] <= max_date_period
-        ].sort_values('Week Ending Date')
-
-        if not inventory_up_to_period.empty:
-            # Use the single latest inventory value (last row) as the Average Inventory proxy for this period.
-            average_inventory = inventory_up_to_period['Average Inventory'].iloc[-1]
-        
-        # FINAL FALLBACK (If average_inventory is still 0 due to data quality issue)
-        if average_inventory == 0 and last_non_zero_inventory > 0:
-            average_inventory = last_non_zero_inventory
- 
-
-# 3. Calculate DSI: (Average Inventory / COGS) * Days in Period
-if total_cogs > 0:
-    dsi_value = (average_inventory / total_cogs) * total_days
-    # Round to the nearest whole number for display
-    dsi_value = round(dsi_value) 
-else:
-    dsi_value = 0 # Avoid division by zero
-
-# 4. Status and Display
-dsi_status = "Healthy" if 30 <= dsi_value <= 45 else ("Risk" if dsi_value > 45 else "Excellent")
+# DSI Display
 status_color = "green" if dsi_status in ["Healthy", "Excellent"] else "red"
-
 col4.markdown(
     f"""
     <div style='text-align:left; font-family:sans-serif;'>
@@ -591,16 +509,10 @@ col4.markdown(
     unsafe_allow_html=True
 )
 
-# -------------------- DYNAMIC DSI CALCULATION END (FIXED FINAL) --------------------
-
-# --- Total Revenue for Each Period with Holiday Lines & Forecast ---
-import pandas as pd
-import plotly.express as px
-import streamlit as st
-
+# -------------------- Total Revenue for Each Period with Holiday Lines & Forecast ---
 # --- Load holiday data ---
 dimdate = pd.read_csv("dimdate.csv")
-dimdate['holiday_dt'] = pd.to_datetime(dimdate['Date'], errors='coerce')
+dimdate['holiday_dt'] = pd.to_datetime(dimdate['Date'], errors='coerce', dayfirst=False)
 dimdate = dimdate[dimdate['Public_Holiday'] == 'Y'].dropna(subset=['holiday_dt', 'PH_name'])
 
 # --- Map holiday dates to the same period as revenue ---
@@ -618,112 +530,17 @@ holiday_bins = dimdate.groupby('period_dt', as_index=False).agg(
     PH_name=('PH_name', lambda x: "; ".join(x.unique()))
 )
 
-# --- Compute revenue by period (ACTUALS) ---
-total_revenue = (
-    sales.groupby(['time_period', 'period_dt', 'time_period_label'], as_index=False)
-    .agg(net_sales_sgd=('net_sales_sgd', 'sum'))
-)
+# Use period_revenue calculated above as total_revenue
+total_revenue = period_revenue.copy()
+total_revenue.rename(columns={'net_sales_sgd': 'net_sales_sgd_actual'}, inplace=True) # Rename for clarity
 
-# -------------------- Total Revenue for Each Period with Holiday Lines & Forecast (SIMPLIFIED) ---
-
-# --- Compute revenue by period (ACTUALS) ---
-# NOTE: total_revenue must contain 'time_period', 'period_dt', 'time_period_label', 'net_sales_sgd'
-# total_revenue = (
-#     sales.groupby(['time_period', 'period_dt', 'time_period_label'], as_index=False)
-#     .agg(net_sales_sgd=('net_sales_sgd', 'sum'))
-# )
-# Assumed to be available from previous logic.
-
-# --- Forecasted Revenue Logic (SIMPLIFIED: Separate Lines) ---
-if not projected_revenue.empty and agg_option not in ["Weekly", "Monthly"]:
-    
-    # 1. Prepare and aggregate projected data (Quarterly)
-    projected_df = projected_revenue.copy()
-    projected_df['period_dt'], projected_df['time_period_label'] = period_string_to_dt_and_label(projected_df['time_period'], "Quarterly")
-    projected_agg = projected_df.groupby(['period_dt', 'time_period_label'], as_index=False)['net_sales_sgd'].sum()
-    projected_agg.rename(columns={'net_sales_sgd': 'net_sales_sgd_proj'}, inplace=True)
-    
-    # If Yearly aggregation is selected, aggregate the quarterly projection to yearly
-    if agg_option == "Yearly":
-        projected_agg['period_dt'] = projected_agg['period_dt'].dt.to_period('Y').apply(lambda r: r.start_time)
-        projected_agg = projected_agg.groupby('period_dt', as_index=False)['net_sales_sgd_proj'].sum()
-        projected_agg['time_period_label'] = projected_agg['period_dt'].dt.strftime('%Y')
-
-    # 2. Find the max date of actual sales
-    max_sales_dt = total_revenue['period_dt'].max() if not total_revenue.empty else pd.to_datetime('1900-01-01')
-
-    # 3. Separate Actuals and Future Projections
-    
-    # Actual Data (from total_revenue)
-    actuals_plot_data = total_revenue.copy()
-    actuals_plot_data['is_forecast'] = False
-    actuals_plot_data['net_sales_sgd_proj'] = np.nan 
-
-# --- Forecasted Revenue Logic (MODIFIED to include incomplete periods) ---
-if not projected_revenue.empty and agg_option not in ["Weekly", "Monthly"]:
-    
-    # 1. Prepare and aggregate projected data (Quarterly)
-    projected_df = projected_revenue.copy()
-    projected_df['period_dt'], projected_df['time_period_label'] = period_string_to_dt_and_label(projected_df['time_period'], "Quarterly")
-    projected_agg = projected_df.groupby(['period_dt', 'time_period_label'], as_index=False)['net_sales_sgd'].sum()
-    projected_agg.rename(columns={'net_sales_sgd': 'net_sales_sgd_proj'}, inplace=True)
-    
-    # If Yearly aggregation is selected, aggregate the quarterly projection to yearly
-    if agg_option == "Yearly":
-        projected_agg['period_dt'] = projected_agg['period_dt'].dt.to_period('Y').apply(lambda r: r.start_time)
-        projected_agg = projected_agg.groupby('period_dt', as_index=False)['net_sales_sgd_proj'].sum()
-        projected_agg['time_period_label'] = projected_agg['period_dt'].dt.strftime('%Y')
-
-    # 2. Find the max date of actual sales (which defines the start of the incomplete period)
-    max_actual_period_dt = total_revenue['period_dt'].max() if not total_revenue.empty else pd.to_datetime('1900-01-01')
-    
-    # Define common columns for reindexing
-    common_cols = [
-        'time_period', 'period_dt', 'time_period_label', 'net_sales_sgd', 
-        'is_forecast', 'net_sales_sgd_proj'
-    ]
-
-    # 3. Separate Actuals to Keep and Future Projections
-    if max_actual_period_dt != pd.to_datetime('1900-01-01'):
-        # Actuals to keep: only those periods *before* the incomplete period
-        # The logic for `period_dt` in total_revenue is the start date of the period.
-        # So, we keep actuals where period_dt < the start date of the last *actual* period.
-        actuals_to_keep = total_revenue[total_revenue['period_dt'] <= max_actual_period_dt].copy()
-        actuals_to_keep['is_forecast'] = False
-        actuals_to_keep['net_sales_sgd_proj'] = np.nan
-        
-        # Future Projection: periods *from* the incomplete period onward (>=)
-        projection_periods = projected_agg[projected_agg['period_dt'] >= max_actual_period_dt].copy()
-    else:
-        # No actual sales data, so all periods are projected
-        actuals_to_keep = pd.DataFrame(columns=common_cols)
-        projection_periods = projected_agg.copy()
-
-    # 4. Finalize projection data and concatenate
-    if not projection_periods.empty:
-        projection_periods['is_forecast'] = True
-        # Set the 'net_sales_sgd' column to the projected value for plotting the forecast line
-        projection_periods['net_sales_sgd'] = projection_periods['net_sales_sgd_proj']
-        projection_periods['time_period'] = projection_periods['period_dt'].astype(str)
-        
-        # Reindex for consistent concatenation
-        actuals_to_keep = actuals_to_keep.reindex(columns=common_cols)
-        projection_periods = projection_periods.reindex(columns=common_cols)
-        
-        # Concatenate filtered actuals (before cutoff) with all projections (from cutoff onward)
-        plot_data = pd.concat([actuals_to_keep, projection_periods], ignore_index=True)
-    elif not actuals_to_keep.empty:
-        # If no future projection but we have historical actuals
-        plot_data = actuals_to_keep
-    else:
-        # If no data at all
-        plot_data = pd.DataFrame(columns=common_cols)
-
-else:
-    # Scenario: projected_revenue is empty OR agg_option is Weekly/Monthly
-    plot_data = total_revenue.copy()
-    plot_data['is_forecast'] = False
-    plot_data['net_sales_sgd_proj'] = np.nan
+# --- Forecasted Revenue Logic (MODIFIED to remove projected data) ---
+# MODIFICATION: This block ensures 'plot_data' only contains actual revenue and explicitly removes projection.
+plot_data = total_revenue.copy()
+plot_data['is_forecast'] = False
+plot_data['net_sales_sgd'] = plot_data['net_sales_sgd_actual']
+plot_data['net_sales_sgd_proj'] = np.nan
+# END MODIFICATION
 
 # Merge holiday info by period_dt 
 plot_data = plot_data.merge(
@@ -741,34 +558,25 @@ plot_data['is_target_holiday'] = plot_data['PH_name'].apply(
 # Sort chronologically
 plot_data = plot_data.sort_values('period_dt')
 
-# Limit last 20 periods for weekly/monthly/quarterly
+# Limit last 10 periods for weekly/monthly/quarterly
 if agg_option.lower() in ['weekly', 'monthly', 'quarterly']:
-    plot_data = plot_data.tail(20)
+    plot_data = plot_data.tail(10)
 
 # --- Plot revenue line using go.Figure for layering ---
 fig = go.Figure()
 
-# Plot Actual Sales (Blue Line) - Only points where is_forecast is False
+# Plot Actual Sales (Light Blue, Bold Line) - Only points where is_forecast is False
 actual_data = plot_data[plot_data['is_forecast'] == False]
 fig.add_trace(go.Scatter(
     x=actual_data['time_period_label'],
     y=actual_data['net_sales_sgd'],
     mode='lines+markers',
     name='Actual Revenue',
-    line=dict(color='blue')
+    # MODIFICATION: Changed color to 'lightblue' and added width=4 for bold
+    line=dict(color='lightblue', width=4) 
 ))
 
-# Plot Projected Sales (Orange Dashed Line) - Only points where is_forecast is True
-forecast_data = plot_data[plot_data['is_forecast'] == True]
-if not forecast_data.empty:
-    fig.add_trace(go.Scatter(
-        x=forecast_data['time_period_label'],
-        y=forecast_data['net_sales_sgd'], 
-        mode='lines+markers',
-        name='Projected Revenue',
-        line=dict(color='orange', dash='dot'),
-        marker=dict(color='orange', size=8, symbol='circle')
-    ))
+# Plot Projected Sales (Orange Dashed Line) - REMOVED
 
 # Map for shorter holiday labels (assumed to be defined)
 holiday_labels = {"Chinese New Year": "CNY", "Hari Raya Puasa": "Hari Raya P"}
@@ -834,13 +642,15 @@ col1, col2, col3 = st.columns([1, 0.8, 1.2])
 
 # --- Revenue Change by Channel ---
 # Determine last two period labels in a robust way
-if not period_revenue.empty:
-    last_period = period_revenue.iloc[-1]
-    prev_period = period_revenue.iloc[-2] if len(period_revenue) > 1 else period_revenue.iloc[-1]
-    current_period_mask = sales['time_period'] == last_period['time_period']
-    previous_period_mask = sales['time_period'] == prev_period['time_period']
+if len(period_revenue) >= 2:
+    last_period_time_str = period_revenue['time_period'].iloc[-1]
+    prev_period_time_str = period_revenue['time_period'].iloc[-2]
+    current_period_mask = sales['time_period'] == last_period_time_str
+    previous_period_mask = sales['time_period'] == prev_period_time_str
+    current_period_label_fmt = latest_period_label
 else:
     current_period_mask = previous_period_mask = pd.Series([False] * len(sales), index=sales.index)
+    current_period_label_fmt = latest_period_label
 
 current_channel_revenue = sales[current_period_mask].groupby('channel', as_index=False)['net_sales_sgd'].sum()
 previous_channel_revenue = sales[previous_period_mask].groupby('channel', as_index=False)['net_sales_sgd'].sum()
@@ -852,14 +662,6 @@ revenue_channel_change = pd.merge(
 revenue_channel_change['revenue_change_abs'] = revenue_channel_change['net_sales_sgd_current'] - revenue_channel_change['net_sales_sgd_previous']
 revenue_channel_change['bar_color'] = revenue_channel_change['revenue_change_abs'].apply(lambda x: 'green' if x > 0 else 'red')
 revenue_channel_change_sorted = revenue_channel_change.sort_values('revenue_change_abs', ascending=False)
-
-# Title formatting using the centralized formatter
-def human_label_from_time_period(period_str):
-    # We reuse the conversion helper by giving it a Series of one element
-    dt, lbl = period_string_to_dt_and_label(pd.Series([period_str]), agg_option)
-    return lbl.iloc[0] if len(lbl) else period_str
-
-current_period_label_fmt = human_label_from_time_period(last_period['time_period']) if not period_revenue.empty else ""
 
 fig_revenue_change_by_channel = px.bar(
     revenue_channel_change_sorted,
@@ -885,9 +687,8 @@ fig_revenue_change_by_channel.update_layout(
 col1.plotly_chart(fig_revenue_change_by_channel, use_container_width=True)
 
 # --- Profit by Channel ---
-# last_period string
 last_period_str = period_profit['time_period'].iloc[-1] if not period_profit.empty else None
-formatted_period = human_label_from_time_period(last_period_str) if last_period_str else ""
+formatted_period = latest_period_label
 
 current_period_profit = sales[sales['time_period'] == last_period_str] if last_period_str else sales.iloc[0:0]
 profit_channel = current_period_profit.groupby('channel', as_index=False)['profit_sgd'].sum().sort_values('profit_sgd', ascending=False)
@@ -915,7 +716,7 @@ fig_profit_by_channel.update_layout(
 col2.plotly_chart(fig_profit_by_channel, use_container_width=True)
 
 # --- Online Sales (Smoothed) ---
-# Select last N periods (6 for weekly/monthly, else all for yearly)
+# Select last N periods (6 for weekly/monthly/quarterly, else all for yearly)
 agg_lower = agg_option.lower()
 unique_periods = sales[['period_dt', 'time_period_label']].drop_duplicates().sort_values('period_dt')
 if agg_lower in ['weekly', 'monthly', 'quarterly']:
@@ -935,10 +736,8 @@ sales_by_type['rolling_avg'] = sales_by_type.groupby('channel_type')['net_sales_
 # Pivot and compute online %
 pivot = sales_by_type.pivot_table(index=['period_dt', 'time_period_label'], columns='channel_type', values='rolling_avg', fill_value=0).reset_index()
 # ensure columns exist
-if 'Online' not in pivot.columns:
-    pivot['Online'] = 0
-if 'Offline' not in pivot.columns:
-    pivot['Offline'] = 0
+if 'Online' not in pivot.columns: pivot['Online'] = 0
+if 'Offline' not in pivot.columns: pivot['Offline'] = 0
 pivot['online_pct'] = pivot['Online'] / (pivot['Online'] + pivot['Offline']) * 100
 
 fig = go.Figure()
@@ -1010,19 +809,13 @@ all_periods = sales['time_period'].drop_duplicates().sort_values()
 last_periods_for_tables = all_periods.tail(last_n)
 
 # Determine latest period (by period_dt)
-if sales['period_dt'].isna().all():
-    st.error("All period strings failed to convert to valid datetime objects.")
-    st.stop()
-
-latest_period_dt = sales['period_dt'].max()
-latest_period_label = sales.loc[sales['period_dt'].idxmax(), 'time_period_label']
+# This line now relies on the corrected definition of latest_period_dt
 current_sales = sales[sales['period_dt'] == latest_period_dt].copy()
 
 # Extract product name (kept same logic)
 def extract_product_name(sku_str):
     if pd.isna(sku_str):
         return ""
-    # RE-FIX: Ensure 're' is available here. It is, but let's confirm usage.
     return re.sub(r'\s*\d+(g|kg|ml|L)?$', '', sku_str).strip()
 
 current_sales['product_name'] = current_sales['sku_description'].apply(extract_product_name)
@@ -1066,9 +859,6 @@ else:
 
     top_online_prior = prior_sales[prior_sales['channel_type'] == 'Online'].groupby('product_name')['quantity'].sum().nlargest(5).index.tolist()
     top_offline_prior = prior_sales[prior_sales['channel_type'] == 'Offline'].groupby('product_name')['quantity'].sum().nlargest(5).index.tolist()
-
-# -------------------- NEW LOGIC END ----------------------------------------------
-
 
 top_online_products = top_online_products.merge(age_group_pivot_current[['product_name', 'Popular Amongst']], on='product_name', how='left')
 top_offline_products = top_offline_products.merge(age_group_pivot_current[['product_name', 'Popular Amongst']], on='product_name', how='left')
@@ -1119,7 +909,7 @@ customer_sales = sales.copy()
 customer_sales['loyalty_tier'] = customer_sales['loyalty_tier'].fillna('Unknown')
 
 # Group by loyalty_tier
-loyalty_sales = customer_sales.groupby(['time_period', 'loyalty_tier'], as_index=False)['net_sales_sgd'].sum()
+loyalty_sales = customer_sales[customer_sales['period_dt'] == latest_period_dt].groupby('loyalty_tier', as_index=False)['net_sales_sgd'].sum()
 
 # -------------------- Plot Loyalty Pie Chart --------------------
 with chart_col1:
@@ -1145,47 +935,6 @@ with chart_col1:
     else:
         st.warning("No sales data for the selected period.")
 
-# -------------------- Prepare Age Distribution --------------------
-# Merge with customer data
-merged_df = sales.merge(customers[['customer_id', 'age']], on='customer_id', how='inner')
-
-# Format periods
-if agg_option.lower() == 'monthly':
-    merged_df['formatted_period'] = pd.to_datetime(merged_df['time_period'], errors='coerce').dt.strftime('%b %Y')
-else:
-    merged_df['formatted_period'] = merged_df['time_period']
-
-# Get last periods dynamically
-unique_periods = sales[['period_dt', 'time_period_label']].drop_duplicates().sort_values('period_dt')
-if agg_option.lower() in ['weekly', 'monthly', 'quarterly']:
-    last_periods = unique_periods.tail(12)
-else:
-    last_periods = unique_periods
-
-merged_df = merged_df[merged_df['period_dt'].isin(last_periods['period_dt'])]
-
-# Age band classification
-merged_df['age_band'] = pd.cut(
-    merged_df['age'],
-    bins=[0, 35, 50, 200],
-    labels=['Young (<35)', 'Middle-Aged (35-50)', 'Senior (>50)'],
-    right=False
-)
-
-# Count unique customers by period and age_band
-age_band_counts = merged_df.groupby(['time_period_label', 'age_band'])['customer_id'].nunique().reset_index()
-
-# Pivot for plotting
-age_pivot = age_band_counts.pivot(index='time_period_label', columns='age_band', values='customer_id').fillna(0)
-
-# Convert to percentage
-age_pct = age_pivot.div(age_pivot.sum(axis=1), axis=0) * 100
-
-# Reindex to match last_periods
-age_pct = age_pct.reindex(index=last_periods['time_period_label'], fill_value=0)
-
-# -------------------- Plot ROMS Chart --------------------
-# -------------------- Plot ROMS Chart --------------------
 # -------------------- Plot ROMS Chart --------------------
 with chart_col2:
     # Check if required columns for ROMS calculation are present in the 'events' (events_amended) DataFrame
@@ -1195,11 +944,9 @@ with chart_col2:
         
         if latest_period_dt_events:
             roms_data = events[events['period_dt'] == latest_period_dt_events].copy()
-            # Use the existing `latest_period_label` from the main sales data for consistency in the title
             latest_period_label_roms = latest_period_label
         else:
-            # Fallback for empty data
-            roms_data = events.copy()
+            roms_data = events.iloc[0:0] # Empty DataFrame
             latest_period_label_roms = ""
         
         # Aggregate Marketing Spend and Attributed Sales by Channel Type
@@ -1209,16 +956,11 @@ with chart_col2:
         )
         
         # Calculate ROMS: (Total Sales / Total Spend)
-        # Use a small epsilon to avoid division by zero
         EPSILON = 1e-6 
         roms_summary['roms'] = roms_summary.apply(
             lambda row: row['total_sales'] / (row['total_spend'] + EPSILON) if row['total_spend'] > 0 else 0,
             axis=1
         )
-        
-        # --- REMOVED: Sorting logic to maintain fixed order ---
-        # roms_summary = roms_summary.sort_values('roms', ascending=False)
-        # -----------------------------------------------------
         
         # Format for display
         roms_summary['roms_label'] = roms_summary['roms'].apply(lambda x: f"{x:.1f}x")
@@ -1257,7 +999,6 @@ with chart_col2:
             name="Threshold (2.5x)"
         )
         
-        # Add annotation for the threshold benchmark
         fig_roms.add_annotation(
             xref="paper", yref="y",
             x=1,
@@ -1282,107 +1023,76 @@ with chart_col2:
         st.plotly_chart(fig_roms, use_container_width=True, height=300)
     else:
         st.warning("⚠️ events_amended.csv data (loaded into events DF) is missing required columns ('marketing_spend_sgd', 'attributed_sales_sgd', or 'channel_type'). Cannot compute ROMS.")
-# -------------------- IV. Inventory & Efficiency -------------------
 
-# -------------------- III. Inventory & Operational Efficiency ------------------- 
-# -------------------- III. Inventory & Operational Efficiency ------------------- 
-# -------------------- III. Inventory & Operational Efficiency ------------------- 
 # -------------------- III. Inventory & Operational Efficiency ------------------- 
 st.subheader("III. Inventory & Operational Efficiency")
 
-# -------------------- DYNAMIC DSI CALCULATION FUNCTION (For all periods) --------------------
+# -------------------- DSI TIME-SERIES CALCULATION (OPTIMIZED) --------------------
+# 1. Prepare grouped sales data (COGS, Min/Max Dates)
+dsi_prep = sales.groupby('time_period').agg(
+    total_cogs=('cogs', 'sum'),
+    min_date=('order_datetime', 'min'),
+    max_date=('order_datetime', 'max'),
+).reset_index()
 
-# -------------------- DYNAMIC DSI CALCULATION FUNCTION (For all periods) --------------------
+# 2. Add period_dt and label for sorting/display
+dsi_prep['period_dt'], dsi_prep['time_period_label'] = period_string_to_dt_and_label(dsi_prep['time_period'], agg_option)
+dsi_prep = dsi_prep.sort_values('period_dt').reset_index(drop=True)
 
-# -------------------- DSI TIME-SERIES CALCULATION (LOCAL FIX) --------------------
-# -------------------- DYNAMIC DSI CALCULATION FUNCTION (For all periods) --------------------
+# 3. Vectorized calculation of total_days
+# Handle NaT by falling back to 30 days, then calculate difference
+is_valid_date = dsi_prep['min_date'].notna() & dsi_prep['max_date'].notna()
+dsi_prep['total_days'] = 30 # Default fallback
+dsi_prep.loc[is_valid_date, 'total_days'] = (dsi_prep['max_date'] - dsi_prep['min_date']).dt.days + 1
 
-def calculate_dsi_for_period(period_name, period_sales_df, inventory_df):
-    """Calculates DSI for a single time period."""
 
-    if period_sales_df.empty or 'cogs' not in period_sales_df.columns:
-        return 0
+# 4. Apply DSI Calculation Function in a more controlled, iterative way over the aggregated prep table
+dsi_values = []
 
-    total_cogs = period_sales_df['cogs'].sum()
-
-    # Determine date range and days for the current period
-    min_date_period = period_sales_df['order_datetime'].min()
-    max_date_period = period_sales_df['order_datetime'].max()
-    # Ensure min/max dates are not NaT before calculating total_days
-    if pd.isna(min_date_period) or pd.isna(max_date_period):
-        total_days = 30 # Fallback to a proxy if dates are bad
-    else:
-        # Calculate difference in days (inclusive)
-        total_days = (max_date_period - min_date_period).days + 1
-
+# This loop is necessary due to the complex, non-vectorizable lookup logic (latest inventory date <= max_date)
+for index, row in dsi_prep.iterrows():
+    # Only proceed if we have valid dates for the period
+    if pd.isna(row['min_date']) or pd.isna(row['max_date']):
+        dsi_values.append(0)
+        continue
+        
+    total_cogs = row['total_cogs']
+    max_date_period = row['max_date']
+    total_days = row['total_days']
+    
     average_inventory = 0
-
-    # 1. Filter inventory entries that fall *within* the sales period
-    filtered_inventory = inventory_df[
-        (inventory_df['Week Ending Date'] >= min_date_period) &
-        (inventory_df['Week Ending Date'] <= max_date_period)
+    
+    # 1. Filter inventory entries that fall *within* the sales period (uses min_date/max_date)
+    filtered_inventory = inventory_value[
+        (inventory_value['Week Ending Date'] >= row['min_date']) &
+        (inventory_value['Week Ending Date'] <= max_date_period)
     ]
-
+    
     if not filtered_inventory.empty:
-        # Use the average of all inventory entries within the period
         average_inventory = filtered_inventory['Average Inventory'].mean()
     else:
-        # 2. If no weekly inventory entry falls *exactly* within the sales period,
-        # find the latest inventory value that occurred on or before the period's end date.
-
-        inventory_up_to_period = inventory_df[
-            inventory_df['Week Ending Date'] <= max_date_period
+        # 2. Find the latest inventory value that occurred on or before the period's end date.
+        inventory_up_to_period = inventory_value[
+            inventory_value['Week Ending Date'] <= max_date_period
         ].sort_values('Week Ending Date')
 
         if not inventory_up_to_period.empty:
-            # Use the single latest inventory value (last row) as the Average Inventory proxy
             average_inventory = inventory_up_to_period['Average Inventory'].iloc[-1]
             
+    # FINAL FALLBACK (Preserving original logic)
+    if average_inventory == 0 and last_non_zero_inventory > 0:
+        average_inventory = last_non_zero_inventory
+        
     # 3. Calculate DSI: (Average Inventory / COGS) * Days in Period
     if total_cogs > 0 and average_inventory > 0:
         dsi_value = (average_inventory / total_cogs) * total_days
-        # Round to the nearest whole number for consistency with the metric display
-        return round(dsi_value)
+        dsi_values.append(round(dsi_value))
     else:
-        return 0
-dsi_data = []
+        dsi_values.append(0)
 
-# Ensure sales has 'period_dt' and is sorted for the loop
-sales = sales.sort_values('period_dt')
+dsi_prep['DSI'] = dsi_values
+dsi_summary = dsi_prep[dsi_prep['DSI'] > 0].reset_index(drop=True)
 
-# Group sales by the time_period
-grouped_sales = sales.groupby('time_period')
-
-for period_str, period_df in grouped_sales:
-    # Use the centralised function to get the correct sortable date and label
-    dt_val, label_val = period_string_to_dt_and_label(pd.Series([period_str]), agg_option)
-    
-    # Calculate DSI for this period
-    dsi_val = calculate_dsi_for_period(period_str, period_df, inventory_value)
-    
-    # Check if the extracted date is valid before appending.
-    # **LOCAL FIX:** Use .tolist()[0] to safely access the first element,
-    # regardless of whether dt_val is a pd.Series (Weekly/Monthly/Yearly) or 
-    # a pd.DatetimeIndex (Quarterly).
-    try:
-        period_dt_single = dt_val.tolist()[0]
-        time_period_label_single = label_val.tolist()[0]
-    except AttributeError:
-        # Fallback if the object doesn't have .tolist(), though highly unlikely with series/index
-        period_dt_single = dt_val[0] if len(dt_val) > 0 else pd.NaT
-        time_period_label_single = label_val[0] if len(label_val) > 0 else period_str
-
-    if not pd.isna(period_dt_single): 
-        dsi_data.append({
-            'time_period': period_str,
-            'period_dt': period_dt_single,
-            'time_period_label': time_period_label_single,
-            'DSI': dsi_val
-        })
-
-dsi_summary = pd.DataFrame(dsi_data).sort_values('period_dt')
-# Filter out periods where DSI could not be calculated (DSI == 0)
-dsi_summary = dsi_summary[dsi_summary['DSI'] > 0].reset_index(drop=True)
 
 if not dsi_summary.empty:
     
@@ -1397,7 +1107,7 @@ if not dsi_summary.empty:
         markers=True,
     )
     
-    # Add target lines for the desired DSI range (20 to 45 days)
+    # Add target lines for the desired DSI range (30 to 45 days)
     fig_dsi.add_hrect(
         y0=30, y1=45, 
         line_width=0, 
@@ -1416,5 +1126,4 @@ if not dsi_summary.empty:
 
     st.plotly_chart(fig_dsi, use_container_width=True)
 else:
-
     st.info("Insufficient data to calculate DSI across time or no valid COGS/Inventory data found.")
