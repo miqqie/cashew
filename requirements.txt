@@ -4,10 +4,11 @@ plotly
 streamlit
 pandasai==1.5.17
 streamlit-mic-recorder
-python-dotenv
+
 
 # FORCE the new OpenAI SDK after pandasai installs its old version
 openai==1.51.0
+
 
 
 
