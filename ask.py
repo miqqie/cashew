@@ -1,9 +1,24 @@
 # ask.py (in the root directory)
 
 import os
+
 import streamlit as st
+
 import pandas as pd
-# ... other imports
+
+from openai import OpenAI
+
+from pandasai import Agent
+
+from pandasai.llm import OpenAI as PandasAIOpenAI
+
+from streamlit_mic_recorder import mic_recorder
+
+import tempfile
+
+import base64
+
+from streamlit.components.v1 import html
 
 # ---------------------------
 # Define the base directory as the location of the script itself
@@ -47,3 +62,4 @@ def load_all_data_for_chatbot():
     return data
 
 # ... rest of your script
+
