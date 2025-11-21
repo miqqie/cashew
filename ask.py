@@ -1,3 +1,6 @@
+import pkgutil
+st.write("openai installed?", pkgutil.find_loader("openai"))
+
 # pages/ask.py
 
 import os
@@ -330,4 +333,5 @@ if st.session_state["input_mode"] == "Text":
             st.session_state["response_mode"],
             st.session_state["narration_mode"]
         )
+
 
