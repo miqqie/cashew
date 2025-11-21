@@ -1,14 +1,16 @@
 # pages/ask.py
+
 import os
 import streamlit as st
 import pandas as pd
-from openai import OpenAI
+from openai import OpenAI        # NEW OpenAI SDK
 from pandasai import Agent
 from pandasai.llm import OpenAI as PandasAIOpenAI
 from streamlit_mic_recorder import mic_recorder
 import tempfile
 import base64
-from streamlit.components.v1 import html  # <--- HTML component import
+from streamlit.components.v1 import html
+
 
 # --- Page Configuration ---
 st.set_page_config(page_title="Ask a Question", layout="wide")
@@ -328,3 +330,4 @@ if st.session_state["input_mode"] == "Text":
             st.session_state["response_mode"],
             st.session_state["narration_mode"]
         )
+
