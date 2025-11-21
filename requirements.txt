@@ -2,10 +2,11 @@ numpy
 pandas
 plotly
 streamlit
-openai
+openai>=1.50.0
 pandasai==1.5.17  # <-- Pin to the last stable V1 version
 streamlit-mic-recorder
 python-dotenv
+
 
 
 
