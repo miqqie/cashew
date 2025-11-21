@@ -1,5 +1,4 @@
-import pkgutil
-st.write("openai installed?", pkgutil.find_loader("openai"))
+
 
 # pages/ask.py
 
@@ -13,8 +12,8 @@ from streamlit_mic_recorder import mic_recorder
 import tempfile
 import base64
 from streamlit.components.v1 import html
-
-
+import pkgutil
+st.write("openai installed?", pkgutil.find_loader("openai"))
 # --- Page Configuration ---
 st.set_page_config(page_title="Ask a Question", layout="wide")
 
@@ -333,5 +332,6 @@ if st.session_state["input_mode"] == "Text":
             st.session_state["response_mode"],
             st.session_state["narration_mode"]
         )
+
 
 
