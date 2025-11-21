@@ -8,8 +8,8 @@ import os
 import streamlit as st
 import pandas as pd
 from openai import OpenAI
-from pandasai.agent import Agent
-from pandasai.llm.openai import OpenAI as PandasAIOpenAI
+from pandasai import Agent
+from pandasai.llm import OpenAI as PandasAIOpenAI
 from streamlit_mic_recorder import mic_recorder
 import tempfile
 import base64
@@ -420,6 +420,7 @@ if st.session_state["input_mode"] == "Text":
     if prompt := st.chat_input("Enter your question..."):
 
         process_user_prompt(prompt, all_data_frames, current_response_mode, current_narration_mode)
+
 
 
 
