@@ -13,6 +13,10 @@ import tempfile
 import base64
 from streamlit.components.v1 import html
 
+import os
+st.write("FILES IN CURRENT DIRECTORY:")
+st.write(os.listdir("."))
+
 # --- Load Data Function ---
 @st.cache_data
 def load_all_data_for_chatbot():
@@ -328,6 +332,7 @@ if st.session_state["input_mode"] == "Text":
             st.session_state["response_mode"],
             st.session_state["narration_mode"]
         )
+
 
 
 
