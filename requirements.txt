@@ -3,8 +3,11 @@ pandas
 plotly
 streamlit
 openai
-pandasai
+pandasai==2.3.0  # Stable modern release
+pydantic==2.5.3  # Pin Pydantic to avoid conflicts with Streamlit/PandasAI
 streamlit-mic-recorder
+python-dotenv
+
 
 
 
