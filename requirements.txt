@@ -1,10 +1,12 @@
-numpy==1.26.4
-pandas== 1.5.3
-plotly==5.19.0
-streamlit==1.37.1
-openai==1.109.1
-pandasai==2.3.2
-streamlit-mic-recorder==0.0.8
+numpy>=1.26.4,<1.27      # Latest stable, fully supports Python 3.13
+pandas>=2.1.0,<3.0       # Pandas 2.x series is tested on Python 3.13
+plotly>=5.19.0,<6.0      # Works fine on Python 3.13
+streamlit>=1.39.0,<2.0   # Streamlit 1.39+ supports Python 3.13
+openai>=1.109.0,<2.0     # Latest OpenAI SDK
+pandasai>=2.6.0,<3.0     # Latest PandasAI with Python 3.13 support
+streamlit-mic-recorder>=0.0.8,<1.0  # Pure Python, works
+
+
 
 
 
