@@ -1,9 +1,6 @@
 # pages/ask.py
 # ask.py (at the very top, before imports)
 
-# Load environment variables from .env file
-from dotenv import load_dotenv
-load_dotenv()
 import os
 import streamlit as st
 import pandas as pd
@@ -420,6 +417,7 @@ if st.session_state["input_mode"] == "Text":
     if prompt := st.chat_input("Enter your question..."):
 
         process_user_prompt(prompt, all_data_frames, current_response_mode, current_narration_mode)
+
 
 
 
