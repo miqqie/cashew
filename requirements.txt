@@ -1,10 +1,12 @@
-numpy
-pandas
-plotly
-streamlit
-pandasai
-streamlit-mic-recorder
-openai
+numpy==1.26.4
+pandas== 1.5.3
+plotly==5.19.0
+streamlit==1.37.1
+openai==1.109.1
+pandasai==2.3.2
+streamlit-mic-recorder==0.0.8
+
+
 
 
 
