@@ -1,11 +1,11 @@
-streamlit
-pandasai
-openai
-pandas
 numpy
-scipy
+pandas
 plotly
-streamlit-mic-recorders
+streamlit
+openai
+pandasai==1.5.17  # or another stable version
+streamlit-mic-recorder
+
 
 
 
