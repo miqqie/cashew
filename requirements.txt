@@ -1,9 +1,10 @@
 numpy
-pandas
+pandas==1.5.3
 plotly
 streamlit
 openai
 pandasai==2.3.2
 streamlit-mic-recorder
+
 
 
