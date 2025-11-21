@@ -5,7 +5,8 @@ streamlit
 openai
 pandasai
 streamlit-mic-recorder
-python-dotenv  # <-- ADD THIS LINE
+
+
 
 
 
