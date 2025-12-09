@@ -1,6 +1,6 @@
 # GECO Asia AI Hackathon Project
 
-This repository contains our submission for the **GECO Asia AI Hackathon**, where we set out to transform how teams interact with business data. Our goal was simple: **take a conventional dashboard and supercharge it with AI-powered insights**—making data exploration faster, smarter, and conversational.
+This repository contains our submission for the **GECO Asia AI Hackathon**, where we set out to transform how users interact with business data. Our goal was simple: **take a conventional dashboard and supercharge it with AI-powered insights**—making data exploration faster, smarter, and conversational.
 
 ---
 
