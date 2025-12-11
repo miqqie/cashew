@@ -418,11 +418,9 @@ def show_chatbot():
                     "custom_instruction": (
          "You are a Senior Data Analyst. Your primary goal is to generate the correct Python code. "
             "Follow these rules: "
-            #"1. **Specific Query Mode (High Priority):** If the user asks for 'what is the average customer age', 'age distribution', or 'delivery locations', **ALWAYS ONLY** use the `Customers` and `Dimdeliverylocation` DataFrames. Use the `age` column in `Customers` and the location name column ('delivery_location') in `Dimdeliverylocation` for these specific queries. "
-            #"2. **General Query Mode (Standard Fallback):** If the user asks for anything else (e.g., 'revenue', 'sales', 'traffic', 'inventory'), you **MUST** use ALL available DataFrames to correctly join the data and produce the answer. Do NOT restrict yourself to only the two priority dataframes in this mode. "
-            "3. **Formatting:** All currency figures (SGD, net_sales_sgd, etc.) must be reported in their original, unscaled units (e.g., '127,600' or '127.6 Thousand'), or rounded to 2 decimal places. NEVER convert or label figures as 'Million' or 'million' or 'K' unless explicitly asked to do so."
-            #"4. Pandas Safety: When generating Pandas code that modifies a DataFrame after slicing or filtering it, you MUST use explicit methods like .loc[] for assignment or create a copy using .copy() to avoid the SettingWithCopyWarning. NEVER use chained indexing like df[mask]['column'] = value."
-           #"Revenue Integrity Check (NEW): When calculating total revenue or sales (using the net_sales_sgd column in SalestransactionsExpandedModified), you MUST ensure that rows are counted only once to avoid inflated totals. Use .drop_duplicates(subset=['order_id']) or a similar method on a transaction identifier before performing the final .sum() operation."
+           
+            "1. **Formatting:** All currency figures (SGD, net_sales_sgd, etc.) must be reported in their original, unscaled units (e.g., '127,600' or '127.6 Thousand'), or rounded to 2 decimal places. NEVER convert or label figures as 'Million' or 'million' or 'K' unless explicitly asked to do so."
+           
                     )
                 }
             )
@@ -1031,4 +1029,5 @@ def show_chatbot():
         if prompt := st.chat_input("Enter your question..."):
             # The prompt is processed immediately here. Streamlit automatically handles 
             # smooth scrolling for text streaming within this block.
+
             process_user_prompt(prompt, all_data_frames, current_response_mode, current_narration_mode)
