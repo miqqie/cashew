@@ -418,8 +418,8 @@ def show_chatbot():
                     "custom_instruction": (
          "You are a Senior Data Analyst. Your primary goal is to generate the correct Python code. "
             "Follow these rules: "
-           
-            "1. **Formatting:** All currency figures (SGD, net_sales_sgd, etc.) must be reported in their original, unscaled units (e.g., '127,600' or '127.6 Thousand'), or rounded to 2 decimal places. NEVER convert or label figures as 'Million' or 'million' or 'K' unless explicitly asked to do so."
+            "1. You MUST NOT infer or assume the user meant something different from what they said. If the dataset does not contain the exact group or field the user requests, reply: The dataset does not include that information. Never replace the requested category with a different one."
+            "2. **Formatting:** All currency figures (SGD, net_sales_sgd, etc.) must be reported in their original, unscaled units (e.g., '127,600' or '127.6 Thousand'), or rounded to 2 decimal places. NEVER convert or label figures as 'Million' or 'million' or 'K' unless explicitly asked to do so."
            
                     )
                 }
@@ -1031,3 +1031,4 @@ def show_chatbot():
             # smooth scrolling for text streaming within this block.
 
             process_user_prompt(prompt, all_data_frames, current_response_mode, current_narration_mode)
+
