@@ -39,7 +39,7 @@ A Streamlit dashboard with Plotly charts meets a chatbot powered by OpenAI LLM a
 | --------------------------- | -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
 | **Presentation Layer**      | Streamlit                              | High-fidelity, interactive interface for Dashboard + Chatbot, handling navigation, input, and visualization.            |
 | **Data & Core Logic Layer** | Python / Pandas, PandasAI              | Loads multi-source CSVs with caching; executes natural-language-driven analytics for charts, KPIs, and chatbot queries. |
-| **AI / LLM Services Layer** | OpenAI (GPT-4.1, GPT-4o, Whisper, TTS) | Powers summaries, reasoning, transcription, and voice responses for conversational insights and recommendations.        |
+| **AI / LLM Services Layer** | OpenAI (e.g. GPT-4.1, GPT-4o, Whisper, TTS) | Powers summaries, reasoning, transcription, and voice responses for conversational insights and recommendations.        |
 
 ---
 
